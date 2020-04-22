@@ -222,7 +222,7 @@ def norm_pois_pmf(x, mu_observed, s2_observed):
 
 
 # Returns a grid of probabilities of the game ending in certain scores (rows correspond to home team, columns to visitor)
-def compute_odds(mu_home, mu_visitor, condition, MSE=1.1, grid_size=20):
+def compute_odds(mu_home, mu_visitor, condition, MSE=1.0, grid_size=20):
 	# Creates a table of probabilities of possible scores
 	pmf_home = np.array([norm_pois_pmf(x,mu_home, MSE) for x in range(grid_size)])
 	pmf_visitor = np.array([norm_pois_pmf(x,mu_visitor, MSE) for x in range(grid_size)])
@@ -247,7 +247,7 @@ def compute_odds(mu_home, mu_visitor, condition, MSE=1.1, grid_size=20):
 	return probability
 
 
-class NadayaraWatson():
+class NadarayaWatson():
 
 	# distance metric
 	def d(x1, x2):
@@ -265,6 +265,17 @@ class NadayaraWatson():
 			return (M - np.mean(M)) / np.sqrt(np.var(M))
 		raise Exception()
 
+
+	# Input a matrix, and output a new matrix with linearly scaled columns
+	# such that each column has magnitude 1
+	def normalize_columns(X):
+		M = np.array(X)  # copy
+		d = len(np.shape(M))
+		if d == 2:
+			return np.array([col / np.linalg.norm(col) for col in M.T]).T
+		if d == 1:
+			return M / np.linalg.norm(M)
+		raise Exception()
 
 	# Return the loo MSE
 	def loo(X, Y, h, N=None, verbose=False):
@@ -286,12 +297,12 @@ class NadayaraWatson():
 			else:
 				i = np.random.randint(0,n)
 
-			if i % np.max((N//100, 1)) == 0 and verbose:
+			if test % np.max((N//33, 1)) == 0 and verbose:
 				print("{}% complete...".format((100*test)//N))
 
 			X_loo = np.delete(X, i, 0)
 			Y_loo = np.delete(Y, i)
-			estimator = NadayaraWatson(X_loo, Y_loo, h)
+			estimator = NadarayaWatson(X_loo, Y_loo, h)
 
 			try:
 				Y_hat.append(estimator.predict(X[i]))
@@ -312,13 +323,14 @@ class NadayaraWatson():
 		return MSE
 
 
-	def __init__(self, X, Y, h=2):
-		X1 = NadayaraWatson.standard_normal_columns(X)  # copy
+	def __init__(self, X, Y, h=1.0):
+		X1 = NadarayaWatson.standard_normal_columns(X)  # copy
 		
 		n, m = np.shape(X)
 		H = np.eye(n) - np.ones((n, n)) / n
 		S = X1.T @ H @ X1 / n
-		D = np.diag(X1.T @ NadayaraWatson.standard_normal_columns(Y)) / n
+		S = NadarayaWatson.normalize_columns(S)
+		D = np.diag(X1.T @ NadarayaWatson.standard_normal_columns(Y)) / n
 
 		self.Y = np.array(Y)
 		self.X_bar = np.mean(X, axis=0)
@@ -331,7 +343,7 @@ class NadayaraWatson():
 
 	# kernel function of distance
 	def K(self, x1, x2):
-		return np.max((0, self.h - NadayaraWatson.d(x1, x2)))
+		return np.max((0, self.h - NadarayaWatson.d(x1, x2)))
 
 	# predict Y based on x
 	def predict(self, x, verbose=False):
@@ -379,30 +391,32 @@ for game in games:
 		Y_visitor.append(visitor_goals)
 
 
-home_estimator = NadayaraWatson(X, Y_home, h=2)
-visitor_estimator = NadayaraWatson(X, Y_visitor, h=2)
+home_estimator = NadarayaWatson(X, Y_home)
+visitor_estimator = NadarayaWatson(X, Y_visitor)
 
-home_team = long_team_name['TOR']
-visitor_team = long_team_name['VAN']
+home_team = long_team_name['VAN']
+visitor_team = long_team_name['TOR']
 x = create_x(home_team, visitor_team)
 
 mu_home = home_estimator.predict(x, verbose=True)
 mu_visitor = visitor_estimator.predict(x, verbose=True)
-condition = lambda i, j: np.abs(i - j) == 1
+condition = lambda i, j: i == 0 or j ==0
 odds = compute_odds(mu_home, mu_visitor, condition)
+
 print("Simulating {} at {}.".format(visitor_team, home_team))
 print("Predicted score: ({:3.2f}, {:3.2f})".format(mu_visitor, mu_home))
 print("Odds of given condition: {}".format(odds))
 
-"""
--------------------------------------------------------
-e = []
-h = [1.9, 2.1]
-for hh in h:
-	e.append(NadayaraWatson.loo(X, Y_home, hh, verbose=True))
-plt.plot(h,e)
-plt.show()
 
+# -------------------------------------------------------
+# e = []
+# h = [0.6, 0.8, 1, 1.2]
+# for hh in h:
+# 	e.append(NadarayaWatson.loo(X, Y_home, hh, N=1500, verbose=True))
+# plt.plot(h,e)
+# plt.show()
+
+"""
 ------- HOME --------
 Starting LOO error estimate!
 h: 1.9
