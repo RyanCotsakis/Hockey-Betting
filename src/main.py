@@ -4,7 +4,17 @@ import matplotlib.pyplot as plt
 import csv
 
 class Game():
+
+	# Converts "yyyy-mm-dd" to integer corresponding (roughly) to days into the hockey season
+	def extract_date(date):
+		ymd = date.split("-")
+		m = (int(ymd[1]) + 2) % 12
+		d = int(ymd[2]) - 1
+		return 31*m + d
+
+
 	def __init__(self, arr):
+		self.date = arr[0]
 		self.visitor = arr[1]
 		self.visitor_goals = int(arr[2])
 		self.home = arr[3]
@@ -40,7 +50,7 @@ class Game():
 
 
 	def stats(self):
-		return self.home, self.visitor, self.home_goals, self.visitor_goals
+		return self.home, self.visitor, self.home_goals, self.visitor_goals, self.date
 
 
 def read_file(fname, header=True):
@@ -222,7 +232,7 @@ def norm_pois_pmf(x, mu_observed, s2_observed):
 
 
 # Returns a grid of probabilities of the game ending in certain scores (rows correspond to home team, columns to visitor)
-def compute_odds(mu_home, mu_visitor, condition, MSE=1.0, grid_size=20):
+def compute_odds(mu_home, mu_visitor, condition, MSE=2.7, grid_size=20):
 	# Creates a table of probabilities of possible scores
 	pmf_home = np.array([norm_pois_pmf(x,mu_home, MSE) for x in range(grid_size)])
 	pmf_visitor = np.array([norm_pois_pmf(x,mu_visitor, MSE) for x in range(grid_size)])
@@ -287,7 +297,7 @@ class NadarayaWatson():
 		print("Starting LOO error estimate!")
 		print("h: {}".format(h))
 
-		failures = []
+		failures = 0
 
 		if N is None:
 			N = n
@@ -307,23 +317,24 @@ class NadarayaWatson():
 			try:
 				Y_hat.append(estimator.predict(X[i]))
 				Y_correct.append(Y[i])
-				failures.append(0)
 			except:
-				failures.append(1)
+				failures += 1
 
 		Y_hat = np.array(Y_hat)
-		Y_correct = np.array(Y_correct[failures == 0])
+		Y_correct = np.array(Y_correct)
 		MSE = np.mean((Y_correct - Y_hat)**2)
+
 		print("Complete!")
 		print("Number of tests: {}".format(N))
-		print("Failed tests: {}".format(np.sum(failures)))
+		print("Failed tests: {}".format(failures))
 		print("h: {}".format(h))
 		print("Variance of estimator: {}".format(np.var(Y_hat)))
+		print("Variance of Y: {}".format(np.var(Y_correct)))
 		print("MSE: {}".format(MSE))
 		return MSE
 
 
-	def __init__(self, X, Y, h=1.0):
+	def __init__(self, X, Y, h=0.5):
 		X1 = NadarayaWatson.standard_normal_columns(X)  # copy
 		
 		n, m = np.shape(X)
@@ -331,6 +342,7 @@ class NadarayaWatson():
 		S = X1.T @ H @ X1 / n
 		S = NadarayaWatson.normalize_columns(S)
 		D = np.diag(X1.T @ NadarayaWatson.standard_normal_columns(Y)) / n
+
 
 		self.Y = np.array(Y)
 		self.X_bar = np.mean(X, axis=0)
@@ -361,42 +373,44 @@ class NadarayaWatson():
 
 
 
-# Create a datapoint x (list of features). The None args can be lists of player indices
-def create_x(home, visitor, home_forwards=None, home_defenders=None, home_goalies=None, visitor_forwards=None, visitor_defenders=None, visitor_goalies=None):
+# Create a datapoint x (list of features).
+# date is a string like "yyyy-mm-dd"
+# home and visitor are long team name strings
+# The None args can be lists of player indices
+def create_x(date, home, visitor, home_forwards=None, home_goalies=None, visitor_forwards=None, visitor_goalies=None):
 	a = [val for key, val in team_stats[home].items()]
 	b = [val for key, val in team_stats[visitor].items()]
 	c = create_average_player(home, forwards, home_forwards)
 	d = create_average_player(visitor, forwards, visitor_forwards)
-	e = create_average_player(home, defenders, home_defenders)
-	f = create_average_player(visitor, defenders, visitor_defenders)
-	g = create_average_player(home, goalies, home_goalies)
-	h = create_average_player(visitor, goalies, visitor_goalies)
-	return a + b + c + d + e + f + g + h
+	e = create_average_player(home, goalies, home_goalies)
+	f = create_average_player(visitor, goalies, visitor_goalies)
+	g = [Game.extract_date(date)]
+	return a + b + c + d + e + f + g
 
 
 X = []
 Y_home = []
 Y_visitor = []
 for game in games:
-	home, visitor, home_goals, visitor_goals = game.stats()
-	X.append(create_x(home, visitor))
+	home, visitor, home_goals, visitor_goals, date = game.stats()
+	X.append(create_x(date, home, visitor))
 	Y_home.append(home_goals)
 	Y_visitor.append(visitor_goals)
 
-	alpha = 0.75
-	if np.random.rand() < alpha:  # Add the symmetric entry with probability alpha
+	if np.random.rand() < 0.2:  # Add the symmetric entry with probability 0.2
 		home, visitor, home_goals, visitor_goals = visitor, home, visitor_goals, home_goals
-		X.append(create_x(home, visitor))
+		X.append(create_x(date, home, visitor))
 		Y_home.append(home_goals)
 		Y_visitor.append(visitor_goals)
 
+# -------------------------------------------------------
 
 home_estimator = NadarayaWatson(X, Y_home)
 visitor_estimator = NadarayaWatson(X, Y_visitor)
 
-home_team = long_team_name['VAN']
-visitor_team = long_team_name['TOR']
-x = create_x(home_team, visitor_team)
+home_team = long_team_name['PIT']
+visitor_team = long_team_name['BOS']
+x = create_x("2019-04-22",home_team, visitor_team)
 
 mu_home = home_estimator.predict(x, verbose=True)
 mu_visitor = visitor_estimator.predict(x, verbose=True)
@@ -407,42 +421,73 @@ print("Simulating {} at {}.".format(visitor_team, home_team))
 print("Predicted score: ({:3.2f}, {:3.2f})".format(mu_visitor, mu_home))
 print("Odds of given condition: {}".format(odds))
 
+# -------------------------------------------------------
+
+# NadarayaWatson.loo(X, Y_home, h=0.5, verbose=True)
+# NadarayaWatson.loo(X, Y_visitor, h=0.5, verbose=True)
 
 # -------------------------------------------------------
-# e = []
-# h = [0.6, 0.8, 1, 1.2]
-# for hh in h:
-# 	e.append(NadarayaWatson.loo(X, Y_home, hh, N=1500, verbose=True))
-# plt.plot(h,e)
-# plt.show()
 
 """
-------- HOME --------
-Starting LOO error estimate!
-h: 1.9
-Complete!
-Fails: 0
-h: 1.9
-Variance: 0.09716847536481521
-MSE: 1.4199531248255177
 
-Starting LOO error estimate!
-h: 2.1
-Complete!
-Fails: 0
-h: 2.1
-Variance: 0.08801052803928254
-MSE: 1.405954545465339
+-------- SYMMETRIC (alpha = 1) --------
 
--------- SYMMETRIC (alpha = 1) ----------
-Fails: 0
-h: 1.9
-Variance: 0.07436608173554196
-MSE: 1.1004652249629905
+	Number of tests: 4706
+	Failed tests: 0
+	h: 0.5
+	Variance of estimator: 0.11061110801833302
+	MSE: 2.8513252385803227
 
-Fails: 0
-h: 2.1
-Variance: ??
-MSE: 1.095 ish
--------------------------------------------------------
+	Number of tests: 4706
+	Failed tests: 0
+	h: 0.6
+	Variance of estimator: 0.09363776546294095
+	MSE: 2.848772989933127
+
+	Number of tests: 4706
+	Failed tests: 0
+	h: 0.8
+	Variance of estimator: 0.07609910625811052
+	MSE: 2.8537768626628703
+
+	Number of tests: 4706
+	Failed tests: 0
+	h: 0.9
+	Variance of estimator: 0.07155072681538371
+	MSE: 2.8578769236305304
+
+-------- VARYING ALPHA (visitor) --------
+
+	Number of tests: 3298
+	alpha: 0.4
+	Failed tests: 0
+	h: 0.6
+	Variance of estimator: 0.10267370794348439
+	MSE: 2.772346413076739
+
+	Number of tests: 2845
+	alpha: 0.2
+	Failed tests: 0
+	h: 0.6
+	Variance of estimator: 0.08302048005789071
+	MSE: 2.72006389869199
+
+
+	Number of tests: 2353
+	alpha: 0
+	Failed tests: 0
+	h: 0.6
+	Variance of estimator: 0.08863747294453851
+	MSE: 2.720698969615882
+
+-------- VARYING ALPHA (home) --------
+
+	Number of tests: 2826
+	alpha: 0.2
+	Failed tests: 0
+	h: 0.6
+	Variance of estimator: 0.13249361649643823
+	MSE: 2.8723055443298926
+
+---------------------------------------
 """
