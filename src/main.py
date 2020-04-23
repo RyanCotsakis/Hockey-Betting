@@ -214,29 +214,12 @@ def create_average_player(team, player_list, l=None):
 	return list(result / total_toi)
 
 
-# pmf of a poisson random variable with lambda distrubuted as a log normal with mean mu_observed and variance s2_observed
-def norm_pois_pmf(x, mu_observed, s2_observed):
-	N = 1001
-
-	# parameters of a lognormal with correct mean and variance
-	s2 = np.log(s2_observed / mu_observed**2 + 1)
-	mu = np.log(mu_observed) - s2/2
-
-	b = mu_observed + 4*np.sqrt(s2_observed)  # upper limit of integration
-
-	f = lambda l: np.exp(-l - (np.log(l)-mu)**2 / (2 * s2)) * np.math.pow(l,x-1) / np.math.factorial(x) / np.sqrt(2 * np.pi * s2)
-	t = np.linspace(0, b, N)
-	delta = b/(N-1)
-
-	return np.sum([f(x) for x in t[1:]]) * delta
-
-
 # Returns a grid of probabilities of the game ending in certain scores (rows correspond to home team, columns to visitor)
-def compute_odds(mu_home, mu_visitor, condition, MSE=2.7, grid_size=20):
+def compute_odds(mu_home, mu_visitor, condition, grid_size=20):
 	# Creates a table of probabilities of possible scores
-	pmf_home = np.array([norm_pois_pmf(x,mu_home, MSE) for x in range(grid_size)])
-	pmf_visitor = np.array([norm_pois_pmf(x,mu_visitor, MSE) for x in range(grid_size)])
-
+	t = np.array(range(grid_size))
+	pmf_home = st.poisson.pmf(t, mu_home)
+	pmf_visitor = st.poisson.pmf(t, mu_visitor)
 	tie_factor = mu_home / (mu_home + mu_visitor)
 
 	grid = np.zeros((grid_size, grid_size))
